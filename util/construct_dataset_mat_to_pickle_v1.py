@@ -22,7 +22,6 @@ task_name = args['task_name']
 # task_name = 'task2-NR'
 # task_name = 'task3-TSR'
 
-
 print('##############################')
 print(f'start processing ZuCo {task_name}...')
 
@@ -61,7 +60,7 @@ for mat_file in tqdm(mat_files):
         word_data = sent.word
         if not isinstance(word_data, float):
             # sentence level:
-            sent_obj = {'content':sent.content}
+            sent_obj = {'content':sent.content , 'rawData':sent.rawData}
             sent_obj['sentence_level_EEG'] = {'mean_t1':sent.mean_t1, 'mean_t2':sent.mean_t2, 'mean_a1':sent.mean_a1, 'mean_a2':sent.mean_a2, 'mean_b1':sent.mean_b1, 'mean_b2':sent.mean_b2, 'mean_g1':sent.mean_g1, 'mean_g2':sent.mean_g2}
 
             if task_name == 'task1-SR':

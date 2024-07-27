@@ -12,7 +12,7 @@ task = "NR"
 rootdir = "./dataset/ZuCo/task2-NR-2.0/Matlab_files/"
 
 print('##############################')
-print(f'start processing ZuCo task2-NR-2.0...')
+print('start processing ZuCo task2-NR-2.0...')
 
 dataset_dict = {}
 
@@ -24,7 +24,6 @@ for file in tqdm(os.listdir(rootdir)):
         # print('file name:', file_name)
         subject = file_name.split("ts")[1].split("_")[0]
         # print('subject: ', subject)
-
         # exclude YMH due to incomplete data because of dyslexia
         if subject != 'YMH':
             assert subject not in dataset_dict
@@ -72,6 +71,7 @@ for file in tqdm(os.listdir(rootdir)):
                     'mean_g1':np.squeeze(f[mean_g1_objs[idx][0]][()]), 
                     'mean_g2':np.squeeze(f[mean_g2_objs[idx][0]][()])
                 }
+                sent_obj['rawData']=np.transpose(f[rawData[idx][0]])
                 # print(sent_obj)
                 sent_obj['word'] = []
 

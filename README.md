@@ -1,9 +1,7 @@
-# IMPORTANT UPDATE NOTE (11/30/2023)
-There is an **unintentional but critical bug** in the original code. **We appreciate [NeuSpeech/EEG-To-Text](https://github.com/NeuSpeech/EEG-To-Text) for pointing it out and providing the fix.** The bug is in the eval_decoding.py script where it originally uses teacher forcing for evaluation, but a more appropriate evaluation setting should be using model.generate(). We have updated the codebase to fix this bug with the correction contributed by [NeuSpeech](https://github.com/NeuSpeech). Note that the results from .generate() can be worse than the results shown in the paper.
+# Related Work
+**[MikeWangWZHL/EEG-To-Text](https://github.com/MikeWangWZHL/EEG-To-Text)**
+**[NeuSpeech/EEG-To-Text](https://github.com/NeuSpeech/EEG-To-Text)**
 
-# [(AAAI 2022) Open Vocabulary EEG-To-Text Decoding and Zero-shot sentiment classification](https://arxiv.org/abs/2112.02690)
-## Create Environment
-run `conda env create -f environment.yml` to create the conda environment (named "EEGToText") used in our experiments.
 ## Download ZuCo datasets
 - Download ZuCo v1.0 'Matlab files' for 'task1-SR','task2-NR','task3-TSR' from https://osf.io/q3zws/files/ under 'OSF Storage' root,  
 unzip and move all `.mat` files to `/dataset/ZuCo/task1-SR/Matlab_files`,`/dataset/ZuCo/task2-NR/Matlab_files`,`/dataset/ZuCo/task3-TSR/Matlab_files` respectively.
@@ -26,22 +24,9 @@ To evaluate the trained EEG-To-Text decoding model from above, run `bash ./scrip
 
 For detailed configuration of the available arguments, please refer to function `get_config(case = 'train_decoding')` in `/config.py`
 
-### Zero-shot sentiment classification pipeline 
-We first train the decoder and the classifier individually, and then we evaluate the pipeline on ZuCo task1-SR data.
+### Word-level EEG-To-Text Decoding
+To learn about dataset definition, please refer to `data.py`.
 
-To run the whole training and evaluation process, run `bash ./scripts/train_eval_zeroshot_pipeline.sh`.
+To view the details of the model, please refer to `my_model.py`.
 
-For detailed configuration of the available arguments, please refer to function `get_config(case = 'eval_sentiment')` in `/config.py`
-
-## Citation
-```
-@inproceedings{wang2022open,
-  title={Open vocabulary electroencephalography-to-text decoding and zero-shot sentiment classification},
-  author={Wang, Zhenhailong and Ji, Heng},
-  booktitle={Proceedings of the AAAI Conference on Artificial Intelligence},
-  volume={36},
-  number={5},
-  pages={5350--5358},
-  year={2022}
-}
-```
+To see more details about the training and testing, please refer to `eeg_to_text.py`.

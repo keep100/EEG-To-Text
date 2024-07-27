@@ -67,12 +67,14 @@ def eval_model(dataloaders, device, tokenizer, criterion, model, output_all_resu
             predicted_string=predicted_string.squeeze()
             
             predictions=tokenizer.encode(predicted_string)
+            # predicted_string=predicted_string[0]
             # print('predicted string:',predicted_string)
             f.write(f'predicted string: {predicted_string}\n')
             f.write(f'################################################\n\n\n')
 
             # convert to int list
             predictions = predictions.tolist()
+            # predictions = tokenizer(predicted_string)["input_ids"]
             truncated_prediction = []
             for t in predictions:
                 if t != tokenizer.eos_token_id:
@@ -163,7 +165,7 @@ if __name__ == '__main__':
             whole_dataset_dicts.append(pickle.load(handle))
     print()
     
-    tokenizer = BartTokenizer.from_pretrained('facebook/bart-large')
+    tokenizer = BartTokenizer.from_pretrained('bart-large')
 
     # test dataset
     test_set = ZuCo_dataset(whole_dataset_dicts, 'test', tokenizer, subject = subject_choice, eeg_type = eeg_type_choice, bands = bands_choice, setting = dataset_setting)
@@ -178,7 +180,7 @@ if __name__ == '__main__':
 
     ''' set up model '''
     checkpoint_path = args['checkpoint_path']
-    pretrained_bart = BartForConditionalGeneration.from_pretrained('facebook/bart-large')
+    pretrained_bart = BartForConditionalGeneration.from_pretrained('bart-large')
     
     if model_name == 'BrainTranslator':
         model = BrainTranslator(pretrained_bart, in_feature = 105*len(bands_choice), decoder_embedding_size = 1024, additional_encoder_nhead=8, additional_encoder_dim_feedforward = 2048)

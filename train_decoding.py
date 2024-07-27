@@ -1,4 +1,7 @@
+import wandb
+import datetime
 import os
+import pdb
 import numpy as np
 import torch
 import torch.nn as nn
@@ -15,8 +18,12 @@ from tqdm import tqdm
 from transformers import BertLMHeadModel, BartTokenizer, BartForConditionalGeneration, BartConfig, BartForSequenceClassification, BertTokenizer, BertConfig, BertForSequenceClassification, RobertaTokenizer, RobertaForSequenceClassification
 
 from data import ZuCo_dataset
-from model_decoding import BrainTranslator, BrainTranslatorNaive
+from model_decoding_old import BrainTranslatorNaive
+from my_model import BrainTranslator
+from util.construct_augmented_dataset import construct_augmented_data
 from config import get_config
+
+wandb.login()
 
 def train_model(dataloaders, device, model, criterion, optimizer, scheduler, num_epochs=25, checkpoint_path_best = './checkpoints/decoding/best/temp_decoding.pt', checkpoint_path_last = './checkpoints/decoding/last/temp_decoding.pt'):
     # modified from: https://pytorch.org/tutorials/beginner/transfer_learning_tutorial.html
@@ -37,10 +44,13 @@ def train_model(dataloaders, device, model, criterion, optimizer, scheduler, num
                 model.eval()   # Set model to evaluate mode
 
             running_loss = 0.0
+            epoch_loss_total = 0.0
+            count=0
 
             # Iterate over data.
             for input_embeddings, seq_len, input_masks, input_mask_invert, target_ids, target_mask, sentiment_labels, sent_level_EEG in tqdm(dataloaders[phase]):
                 
+                count+=1
                 # load in batch
                 input_embeddings_batch = input_embeddings.to(device).float()
                 input_masks_batch = input_masks.to(device)
@@ -55,16 +65,15 @@ def train_model(dataloaders, device, model, criterion, optimizer, scheduler, num
                 # forward
     	        # track history if only in train
                 with torch.set_grad_enabled(phase == 'train'):
-                    seq2seqLMoutput = model(input_embeddings_batch, input_masks_batch, input_mask_invert_batch, target_ids_batch)
-
+                    seq2seqLMoutput,commitment_loss = model(input_embeddings_batch, input_masks_batch, input_mask_invert_batch, target_ids_batch)
+                    
                     """calculate loss"""
                     # logits = seq2seqLMoutput.logits # 8*48*50265
                     # logits = logits.permute(0,2,1) # 8*50265*48
 
-                    # loss = criterion(logits, target_ids_batch_label) # calculate cross entropy loss only on encoded target parts
+                    # loss = criterion(logits, target_ids_batch) # calculate cross entropy loss only on encoded target parts
                     # NOTE: my criterion not used
-                    loss = seq2seqLMoutput.loss # use the BART language modeling loss
-
+                    loss = seq2seqLMoutput.loss+commitment_loss# use the BART language modeling loss
                     # """check prediction, instance 0 of each batch"""
                     # print('target size:', target_ids_batch.size(), ',original logits size:', logits.size(), ',target_mask size', target_mask_batch.size())
                     # logits = logits.permute(0,2,1)
@@ -88,15 +97,21 @@ def train_model(dataloaders, device, model, criterion, optimizer, scheduler, num
                         optimizer.step()
 
                 # statistics
-                running_loss += loss.item() * input_embeddings_batch.size()[0] # batch loss
-                # print('[DEBUG]loss:',loss.item())
-                # print('#################################')
+                batch_loss = loss.item() * input_embeddings_batch.size()[0] # batch loss
+                epoch_loss_total+=batch_loss
+                running_loss+=batch_loss
+                # if (count*input_embeddings_batch.size()[0])%128 ==0:
+                #     if phase=='train':
+                #         wandb.log({"Loss/train": running_loss/128})
+                #     else:
+                #         wandb.log({"Loss/dev": running_loss/128})
+                #     running_loss=0.0
                 
 
             if phase == 'train':
                 scheduler.step()
 
-            epoch_loss = running_loss / dataset_sizes[phase]
+            epoch_loss = epoch_loss_total / dataset_sizes[phase]
 
             print('{} Loss: {:.4f}'.format(phase, epoch_loss))
 
@@ -168,10 +183,11 @@ if __name__ == '__main__':
         
     print(f'[INFO]using model: {model_name}')
     
+    current_datetime = datetime.datetime.now()
     if skip_step_one:
-        save_name = f'{task_name}_finetune_{model_name}_skipstep1_b{batch_size}_{num_epochs_step1}_{num_epochs_step2}_{step1_lr}_{step2_lr}_{dataset_setting}'
+        save_name = f'{task_name}_finetune_{model_name}_skipstep1_b{batch_size}_{num_epochs_step1}_{num_epochs_step2}_{step1_lr}_{step2_lr}_{dataset_setting}_{current_datetime.month}_{current_datetime.day}_{current_datetime.hour}_{current_datetime.minute}'
     else:
-        save_name = f'{task_name}_finetune_{model_name}_2steptraining_b{batch_size}_{num_epochs_step1}_{num_epochs_step2}_{step1_lr}_{step2_lr}_{dataset_setting}'
+        save_name = f'{task_name}_finetune_{model_name}_2steptraining_b{batch_size}_{num_epochs_step1}_{num_epochs_step2}_{step1_lr}_{step2_lr}_{dataset_setting}_{current_datetime.month}_{current_datetime.day}_{current_datetime.hour}_{current_datetime.minute}'
     
     if use_random_init:
         save_name = 'randinit_' + save_name
@@ -199,7 +215,16 @@ if __name__ == '__main__':
     bands_choice = args['eeg_bands']
     print(f'[INFO]using bands {bands_choice}')
 
-
+    # '''init wandb'''
+    # run = wandb.init(
+    #     # Set the project where this run will be logged
+    #     project="EEG-To-Text",
+    #     # Track hyperparameters and run metadata
+    #     config={
+    #         "learning_rate": step2_lr,
+    #         "epochs": num_epochs_step2,
+    #     },
+    # )
     
     ''' set random seeds '''
     seed_val = 312
@@ -247,11 +272,11 @@ if __name__ == '__main__':
     if not os.path.exists(cfg_dir):
         os.makedirs(cfg_dir)
 
-    with open(os.path.join(cfg_dir,f'{save_name}.json'), 'w') as out_config:
+    with open(os.path.join(cfg_dir,f'{task_name}_finetune_{model_name}_skipstep1_b{batch_size}_{num_epochs_step1}_{num_epochs_step2}_{step1_lr}_{step2_lr}_{dataset_setting}.json'), 'w') as out_config:
         json.dump(args, out_config, indent = 4)
 
     if model_name in ['BrainTranslator','BrainTranslatorNaive']:
-        tokenizer = BartTokenizer.from_pretrained('facebook/bart-large')
+        tokenizer = BartTokenizer.from_pretrained('bart-large')
     elif model_name == 'BertGeneration':
         tokenizer = BertTokenizer.from_pretrained('bert-base-cased')
         config = BertConfig.from_pretrained("bert-base-cased")
@@ -278,10 +303,10 @@ if __name__ == '__main__':
     ''' set up model '''
     if model_name == 'BrainTranslator':
         if use_random_init:
-            config = BartConfig.from_pretrained('facebook/bart-large')
+            config = BartConfig.from_pretrained('bart-large')
             pretrained = BartForConditionalGeneration(config)
         else:
-            pretrained = BartForConditionalGeneration.from_pretrained('facebook/bart-large')
+            pretrained = BartForConditionalGeneration.from_pretrained('bart-large')
     
         model = BrainTranslator(pretrained, in_feature = 105*len(bands_choice), decoder_embedding_size = 1024, additional_encoder_nhead=8, additional_encoder_dim_feedforward = 2048)
     
@@ -289,7 +314,7 @@ if __name__ == '__main__':
         pretrained = BertLMHeadModel.from_pretrained('bert-base-cased', config=config)
         model = BrainTranslator(pretrained, in_feature = 105*len(bands_choice), decoder_embedding_size = 768, additional_encoder_nhead=8, additional_encoder_dim_feedforward = 2048)
     elif model_name == 'BrainTranslatorNaive':
-        pretrained = BartForConditionalGeneration.from_pretrained('facebook/bart-large')
+        pretrained = BartForConditionalGeneration.from_pretrained('bart-large')
         model = BrainTranslatorNaive(pretrained, in_feature = 105*len(bands_choice), decoder_embedding_size = 1024, additional_encoder_nhead=8, additional_encoder_dim_feedforward = 2048)
 
     model.to(device)

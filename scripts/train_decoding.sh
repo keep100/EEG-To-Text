@@ -6,9 +6,12 @@ python3 train_decoding.py --model_name BrainTranslator \
     --num_epoch_step1 20 \
     --num_epoch_step2 30 \
     -lr1 0.00005 \
-    -lr2 0.0000005 \
+    -lr2 0.0000027 \
     -b 32 \
     -s ./checkpoints/decoding \
-    -cuda cuda:0
+    -cuda cuda:6
 
+# current best config
+# epoch=60
+# lr2=2e-6,2.7e-6,2.8e-6
 

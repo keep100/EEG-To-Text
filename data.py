@@ -1,30 +1,31 @@
 import os
+import pdb
 import numpy as np
 import torch
 import pickle
 from torch.utils.data import Dataset, DataLoader
 import json
-import matplotlib.pyplot as plt
+import torch.nn.functional as F
+# import matplotlib.pyplot as plt
 from glob import glob
 from transformers import BartTokenizer, BertTokenizer
 from tqdm import tqdm
 from fuzzy_match import match
 from fuzzy_match import algorithims
 
-# macro
-#ZUCO_SENTIMENT_LABELS = json.load(open('./dataset/ZuCo/task1-SR/sentiment_labels/sentiment_labels.json'))
-#SST_SENTIMENT_LABELS = json.load(open('./dataset/stanfordsentiment/ternary_dataset.json'))
 
 def normalize_1d(input_tensor):
     # normalize a 1d tensor
     mean = torch.mean(input_tensor)
     std = torch.std(input_tensor)
     input_tensor = (input_tensor - mean)/std
+    # min_value = torch.min(input_tensor)
+    # max_value = torch.max(input_tensor)
+    # input_tensor = (input_tensor - min_value) / (max_value - min_value)
+
     return input_tensor 
 
-def get_input_sample(sent_obj, tokenizer, eeg_type = 'GD', bands = ['_t1','_t2','_a1','_a2','_b1','_b2','_g1','_g2'], max_len = 56, add_CLS_token = False):
-    
-    def get_word_embedding_eeg_tensor(word_obj, eeg_type, bands):
+def get_word_embedding_eeg_tensor(word_obj, eeg_type, bands):
         frequency_features = []
         for band in bands:
             frequency_features.append(word_obj['word_level_EEG'][eeg_type][eeg_type+band])
@@ -32,10 +33,14 @@ def get_input_sample(sent_obj, tokenizer, eeg_type = 'GD', bands = ['_t1','_t2',
         if len(word_eeg_embedding) != 105*len(bands):
             print(f'expect word eeg embedding dim to be {105*len(bands)}, but got {len(word_eeg_embedding)}, return None')
             return None
+        if np.isnan(word_eeg_embedding).any():
+            return None
         # assert len(word_eeg_embedding) == 105*len(bands)
         return_tensor = torch.from_numpy(word_eeg_embedding)
         return normalize_1d(return_tensor)
 
+def get_input_sample(sent_obj, tokenizer, eeg_type = 'GD', bands = ['_t1','_t2','_a1','_a2','_b1','_b2','_g1','_g2'], max_len = 56, add_CLS_token = False):
+    
     def get_sent_eeg(sent_obj, bands):
         sent_eeg_features = []
         for band in bands:
@@ -53,6 +58,16 @@ def get_input_sample(sent_obj, tokenizer, eeg_type = 'GD', bands = ['_t1','_t2',
     input_sample = {}
     # get target label
     target_string = sent_obj['content']
+    # if not isinstance(sent_obj['rawData'],np.ndarray):
+    #     return None
+    # input_sample['rawData']=normalize_1d(torch.from_numpy(sent_obj['rawData']))
+    # if input_sample['rawData'].shape[1]<10000:
+    #     input_sample['rawData']=F.pad(input_sample['rawData'],(0,10000-input_sample['rawData'].shape[1],0,0))
+    # else:
+    #     input_sample['rawData']=input_sample['rawData'][:,:10000]
+
+    # input_sample['rawData']={}
+    # input_sample['maskedData']={}
     target_tokenized = tokenizer(target_string, padding='max_length', max_length=max_len, truncation=True, return_tensors='pt', return_attention_mask = True)
     
     input_sample['target_ids'] = target_tokenized['input_ids'][0]
@@ -137,6 +152,64 @@ def get_input_sample(sent_obj, tokenizer, eeg_type = 'GD', bands = ['_t1','_t2',
 
     return input_sample
 
+class EEGWordDataset(Dataset):
+    def __init__(self, input_dataset_dicts, phase, tokenizer, subject = 'ALL', eeg_type = 'GD', bands = ['_t1','_t2','_a1','_a2','_b1','_b2','_g1','_g2'], setting = 'unique_sent', max_len = 14):
+        super().__init__()
+        self.word_eeg = []
+        self.english_words = []
+        self.tokenizer = tokenizer
+        self.max_len = max_len
+
+        if not isinstance(input_dataset_dicts,list):
+            input_dataset_dicts = [input_dataset_dicts]
+        for input_dataset_dict in input_dataset_dicts:
+            if subject == 'ALL':
+                subjects = list(input_dataset_dict.keys())
+                print('[INFO]using subjects: ', subjects)
+            else:
+                subjects = [subject]
+            
+            for key in subjects:
+                sub_word_eeg = []
+                sub_english_words = []
+                for sen_obj in input_dataset_dict[key]:
+                    if sen_obj is None:
+                        continue
+                    for word_obj in sen_obj['word']:
+                        word_eeg_embedding = get_word_embedding_eeg_tensor(word_obj, eeg_type, bands)
+                        if word_eeg_embedding is not None:
+                            sub_word_eeg.append(word_eeg_embedding)
+                            if word_obj['content'] == 'emp11111ty':
+                                word_obj['content'] = 'empty'
+                            if word_obj['content'] == 'film.1':
+                                word_obj['content'] = 'film.'
+                            sub_english_words.append(word_obj['content'])
+                total_num_word = len(sub_english_words)
+                train_divider = int(0.8*total_num_word)
+                dev_divider = train_divider + int(0.1*total_num_word)
+                if phase == 'train':
+                    self.word_eeg.append(sub_word_eeg[:train_divider])
+                    self.english_words.append(sub_english_words[:train_divider])
+                elif phase == 'dev':
+                    self.word_eeg.append(sub_word_eeg[train_divider:dev_divider])
+                    self.english_words.append(sub_english_words[train_divider:dev_divider])
+                elif phase == 'test':
+                    self.word_eeg.append(sub_word_eeg[dev_divider:])
+                    self.english_words.append(sub_english_words[dev_divider:])
+        self.word_eeg = np.concatenate(self.word_eeg)
+        self.english_words = list(np.concatenate(self.english_words))
+        # self.word_ids = tokenizer(self.english_words, padding=True, return_tensors="pt")['input_ids']
+    
+    def __len__(self):
+        return len(self.english_words)
+
+    def __getitem__(self, idx):
+        word = self.english_words[idx]
+        word_tokenized = self.tokenizer(word, padding='max_length',max_length=self.max_len, add_special_tokens=False, return_tensors="pt")
+        word_id = word_tokenized['input_ids'][0]
+        attention_mask = word_tokenized['attention_mask'][0]
+        return self.word_eeg[idx], word_id, attention_mask
+
 class ZuCo_dataset(Dataset):
     def __init__(self, input_dataset_dicts, phase, tokenizer, subject = 'ALL', eeg_type = 'GD', bands = ['_t1','_t2','_a1','_a2','_b1','_b2','_g1','_g2'], setting = 'unique_sent', is_add_CLS_token = False):
         self.inputs = []
@@ -183,6 +256,13 @@ class ZuCo_dataset(Dataset):
                             input_sample = get_input_sample(input_dataset_dict[key][i],self.tokenizer,eeg_type,bands = bands, add_CLS_token = is_add_CLS_token)
                             if input_sample is not None:
                                 self.inputs.append(input_sample)
+                elif phase == 'pretrain':
+                    print('[INFO]initializing a pretrain set...')
+                    for key in subjects:
+                        for i in range(total_num_sentence):
+                            input_sample = get_input_sample(input_dataset_dict[key][i],self.tokenizer,eeg_type,bands = bands, add_CLS_token = is_add_CLS_token)
+                            if input_sample is not None:
+                                self.inputs.append(input_sample)
             elif setting == 'unique_subj':
                 print('WARNING!!! only implemented for SR v1 dataset ')
                 # subject ['ZAB', 'ZDM', 'ZGW', 'ZJM', 'ZJN', 'ZJS', 'ZKB', 'ZKH', 'ZKW'] for train
@@ -220,89 +300,87 @@ class ZuCo_dataset(Dataset):
     def __getitem__(self, idx):
         input_sample = self.inputs[idx]
         return (
+            # input_sample['rawData'],
+            # input_sample['maskedData'],
             input_sample['input_embeddings'], 
             input_sample['seq_len'],
             input_sample['input_attn_mask'], 
             input_sample['input_attn_mask_invert'],
             input_sample['target_ids'], 
             input_sample['target_mask'], 
-            input_sample['sentiment_label'], 
+            input_sample['sentiment_label'],  
             input_sample['sent_level_EEG']
         )
         # keys: input_embeddings, input_attn_mask, input_attn_mask_invert, target_ids, target_mask, 
 
 
 """for train classifier on stanford sentiment treebank text-sentiment pairs"""
-class SST_tenary_dataset(Dataset):
-    def __init__(self, ternary_labels_dict, tokenizer, max_len = 56, balance_class = True):
-        self.inputs = []
+# class SST_tenary_dataset(Dataset):
+#     def __init__(self, ternary_labels_dict, tokenizer, max_len = 56, balance_class = True):
+#         self.inputs = []
         
-        pos_samples = []
-        neg_samples = []
-        neu_samples = []
+#         pos_samples = []
+#         neg_samples = []
+#         neu_samples = []
 
-        for key,value in ternary_labels_dict.items():
-            tokenized_inputs = tokenizer(key, padding='max_length', max_length=max_len, truncation=True, return_tensors='pt', return_attention_mask = True)
-            input_ids = tokenized_inputs['input_ids'][0]
-            attn_masks = tokenized_inputs['attention_mask'][0]
-            label = torch.tensor(value)
-            # count:
-            if value == 0:
-                neg_samples.append((input_ids,attn_masks,label))
-            elif value == 1:
-                neu_samples.append((input_ids,attn_masks,label))
-            elif value == 2:
-                pos_samples.append((input_ids,attn_masks,label))
-        print(f'Original distribution:\n\tVery positive: {len(pos_samples)}\n\tNeutral: {len(neu_samples)}\n\tVery negative: {len(neg_samples)}')    
-        if balance_class:
-            print(f'balance class to {min([len(pos_samples),len(neg_samples),len(neu_samples)])} each...')
-            for i in range(min([len(pos_samples),len(neg_samples),len(neu_samples)])):
-                self.inputs.append(pos_samples[i])
-                self.inputs.append(neg_samples[i])
-                self.inputs.append(neu_samples[i])
-        else:
-            self.inputs = pos_samples + neg_samples + neu_samples
+#         for key,value in ternary_labels_dict.items():
+#             tokenized_inputs = tokenizer(key, padding='max_length', max_length=max_len, truncation=True, return_tensors='pt', return_attention_mask = True)
+#             input_ids = tokenized_inputs['input_ids'][0]
+#             attn_masks = tokenized_inputs['attention_mask'][0]
+#             label = torch.tensor(value)
+#             # count:
+#             if value == 0:
+#                 neg_samples.append((input_ids,attn_masks,label))
+#             elif value == 1:
+#                 neu_samples.append((input_ids,attn_masks,label))
+#             elif value == 2:
+#                 pos_samples.append((input_ids,attn_masks,label))
+#         print(f'Original distribution:\n\tVery positive: {len(pos_samples)}\n\tNeutral: {len(neu_samples)}\n\tVery negative: {len(neg_samples)}')    
+#         if balance_class:
+#             print(f'balance class to {min([len(pos_samples),len(neg_samples),len(neu_samples)])} each...')
+#             for i in range(min([len(pos_samples),len(neg_samples),len(neu_samples)])):
+#                 self.inputs.append(pos_samples[i])
+#                 self.inputs.append(neg_samples[i])
+#                 self.inputs.append(neu_samples[i])
+#         else:
+#             self.inputs = pos_samples + neg_samples + neu_samples
         
-    def __len__(self):
-        return len(self.inputs)
+#     def __len__(self):
+#         return len(self.inputs)
 
-    def __getitem__(self, idx):
-        input_sample = self.inputs[idx]
-        return input_sample
-        # keys: input_embeddings, input_attn_mask, input_attn_mask_invert, target_ids, target_mask, 
+#     def __getitem__(self, idx):
+#         input_sample = self.inputs[idx]
+#         return input_sample
+#         # keys: input_embeddings, input_attn_mask, input_attn_mask_invert, target_ids, target_mask, 
         
 
 
 '''sanity test'''
 if __name__ == '__main__':
 
-    check_dataset = 'stanford_sentiment'
+    check_dataset = 'ZuCo'
 
     if check_dataset == 'ZuCo':
         whole_dataset_dicts = []
         
-        dataset_path_task1 = '/shared/nas/data/m1/wangz3/SAO_project/SAO/dataset/ZuCo/task1-SR/pickle/task1-SR-dataset-with-tokens_6-25.pickle' 
+        dataset_path_task1 = './dataset/ZuCo/task1-SR/pickle/task1-SR-dataset.pickle' 
         with open(dataset_path_task1, 'rb') as handle:
             whole_dataset_dicts.append(pickle.load(handle))
 
-        dataset_path_task2 = '/shared/nas/data/m1/wangz3/SAO_project/SAO/dataset/ZuCo/task2-NR/pickle/task2-NR-dataset-with-tokens_7-10.pickle' 
+        dataset_path_task2 = './dataset/ZuCo/task2-NR/pickle/task2-NR-dataset.pickle' 
         with open(dataset_path_task2, 'rb') as handle:
             whole_dataset_dicts.append(pickle.load(handle))
 
-        # dataset_path_task3 = '/shared/nas/data/m1/wangz3/SAO_project/SAO/dataset/ZuCo/task3-TSR/pickle/task3-TSR-dataset-with-tokens_7-10.pickle' 
-        # with open(dataset_path_task3, 'rb') as handle:
-        #     whole_dataset_dicts.append(pickle.load(handle))
-
-        dataset_path_task2_v2 = '/shared/nas/data/m1/wangz3/SAO_project/SAO/dataset/ZuCo/task2-NR-2.0/pickle/task2-NR-2.0-dataset-with-tokens_7-15.pickle' 
+        dataset_path_task2_v2 = './dataset/ZuCo/task2-NR-2.0/pickle/task2-NR-2.0-dataset.pickle' 
         with open(dataset_path_task2_v2, 'rb') as handle:
             whole_dataset_dicts.append(pickle.load(handle))
 
         print()
         for key in whole_dataset_dicts[0]:
-            print(f'task2_v2, sentence num in {key}:',len(whole_dataset_dicts[0][key]))
+            print(f'task2_v2, sentence num in {key}:',len(whole_dataset_dicts[0][key])) 
         print()
 
-        tokenizer = BartTokenizer.from_pretrained('facebook/bart-large')
+        tokenizer = BartTokenizer.from_pretrained('bart-large')
         dataset_setting = 'unique_sent'
         subject_choice = 'ALL'
         print(f'![Debug]using {subject_choice}')
@@ -310,17 +388,21 @@ if __name__ == '__main__':
         print(f'[INFO]eeg type {eeg_type_choice}') 
         bands_choice = ['_t1','_t2','_a1','_a2','_b1','_b2','_g1','_g2'] 
         print(f'[INFO]using bands {bands_choice}')
-        train_set = ZuCo_dataset(whole_dataset_dicts, 'train', tokenizer, subject = subject_choice, eeg_type = eeg_type_choice, bands = bands_choice, setting = dataset_setting)
-        dev_set = ZuCo_dataset(whole_dataset_dicts, 'dev', tokenizer, subject = subject_choice, eeg_type = eeg_type_choice, bands = bands_choice, setting = dataset_setting)
-        test_set = ZuCo_dataset(whole_dataset_dicts, 'test', tokenizer, subject = subject_choice, eeg_type = eeg_type_choice, bands = bands_choice, setting = dataset_setting)
+        # train_set = ZuCo_dataset(whole_dataset_dicts, 'train', tokenizer, subject = subject_choice, eeg_type = eeg_type_choice, bands = bands_choice, setting = dataset_setting)
+        # # train_dataloader = DataLoader(train_set, batch_size = 8, shuffle=True, num_workers=4)
+        # dev_set = ZuCo_dataset(whole_dataset_dicts, 'dev', tokenizer, subject = subject_choice, eeg_type = eeg_type_choice, bands = bands_choice, setting = dataset_setting)
+        # test_set = ZuCo_dataset(whole_dataset_dicts, 'test', tokenizer, subject = subject_choice, eeg_type = eeg_type_choice, bands = bands_choice, setting = dataset_setting)
+        train_set = EEGWordDataset(whole_dataset_dicts, 'train', tokenizer, subject_choice, eeg_type_choice, bands_choice, dataset_setting)
+        dev_set = EEGWordDataset(whole_dataset_dicts, 'dev', tokenizer, subject_choice, eeg_type_choice, bands_choice, dataset_setting)
+        test_set = EEGWordDataset(whole_dataset_dicts, 'test', tokenizer, subject_choice, eeg_type_choice, bands_choice, dataset_setting)
 
         print('trainset size:',len(train_set))
         print('devset size:',len(dev_set))
         print('testset size:',len(test_set))
 
-    elif check_dataset == 'stanford_sentiment':
-        tokenizer = BertTokenizer.from_pretrained('bert-base-cased')
-        SST_dataset = SST_tenary_dataset(SST_SENTIMENT_LABELS, tokenizer)
-        print('SST dataset size:',len(SST_dataset))
-        print(SST_dataset[0])
-        print(SST_dataset[1])
+    # elif check_dataset == 'stanford_sentiment':
+    #     tokenizer = BertTokenizer.from_pretrained('bert-base-cased')
+    #     SST_dataset = SST_tenary_dataset(SST_SENTIMENT_LABELS, tokenizer)
+    #     print('SST dataset size:',len(SST_dataset))
+    #     print(SST_dataset[0])
+    #     print(SST_dataset[1])
