@@ -1,5 +1,6 @@
 # Related Work
 **[MikeWangWZHL/EEG-To-Text](https://github.com/MikeWangWZHL/EEG-To-Text)**
+
 **[NeuSpeech/EEG-To-Text](https://github.com/NeuSpeech/EEG-To-Text)**
 
 ## Download ZuCo datasets
