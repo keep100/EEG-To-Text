@@ -210,6 +210,71 @@ class EEGWordDataset(Dataset):
         attention_mask = word_tokenized['attention_mask'][0]
         return self.word_eeg[idx], word_id, attention_mask
 
+class EEGSentDataset(Dataset):
+    def __init__(self, input_dataset_dicts, phase, tokenizer, subject = 'ALL', eeg_type = 'GD', bands = ['_t1','_t2','_a1','_a2','_b1','_b2','_g1','_g2'], setting = 'unique_sent', max_len = 14, max_sent_len = 56):
+        super().__init__()
+        self.groud_truth = []
+        self.sent_eegs = []
+        self.target_ids = []
+        self.target_words = []
+        self.attention_masks = []
+        self.tokenizer = tokenizer
+        self.max_len = max_len
+        self.max_sent_len = max_sent_len
+
+        if not isinstance(input_dataset_dicts,list):
+            input_dataset_dicts = [input_dataset_dicts]
+        for input_dataset_dict in input_dataset_dicts:
+            if subject == 'ALL':
+                subjects = list(input_dataset_dict.keys())
+                print('[INFO]using subjects: ', subjects)
+            else:
+                subjects = [subject]
+            
+            total_num_sentence = len(input_dataset_dict[subjects[0]])
+            
+            train_divider = int(0.8*total_num_sentence)
+            dev_divider = train_divider + int(0.1*total_num_sentence)
+            if phase == 'test':
+                for key in subjects:
+                    for i in range(dev_divider, total_num_sentence):
+                        sen_obj = input_dataset_dict[key][i]
+                        if sen_obj is None or len(sen_obj['word']) == 0:
+                            continue
+                        self.groud_truth.append(sen_obj['content'])
+                        sent_eeg = []
+                        target_id = []
+                        target_word = []
+                        attention_mask = []
+                        for word_obj in sen_obj['word']:
+                            word_eeg_embedding = get_word_embedding_eeg_tensor(word_obj, eeg_type, bands)
+                            if word_eeg_embedding is not None:
+                                sent_eeg.append(word_eeg_embedding)
+                                word = word_obj['content']
+                                if word == 'emp11111ty':
+                                    word = 'empty'
+                                if word == 'film.1':
+                                    word = 'film.'
+                                word_tokenized = self.tokenizer(word, padding='max_length',max_length=self.max_len, add_special_tokens=False, return_tensors="pt")
+                                target_id.append(word_tokenized['input_ids'][0])
+                                target_word.append(word)
+                                attention_mask.append(word_tokenized['attention_mask'][0])
+                        while len(sent_eeg) < self.max_sent_len:
+                            sent_eeg.append(torch.zeros(105*len(bands)))
+                            target_id.append(torch.zeros(self.max_len))
+                            target_word.append('#')
+                            attention_mask.append(torch.zeros(self.max_len))
+                        self.sent_eegs.append(sent_eeg)
+                        self.target_ids.append(target_id)
+                        self.target_words.append(target_word)
+                        self.attention_masks.append(attention_mask)
+    
+    def __len__(self):
+        return len(self.sent_eegs)
+
+    def __getitem__(self, idx):
+        return self.groud_truth[idx], self.sent_eegs[idx], self.target_ids[idx], self.target_words[idx], self.attention_masks[idx]
+
 class ZuCo_dataset(Dataset):
     def __init__(self, input_dataset_dicts, phase, tokenizer, subject = 'ALL', eeg_type = 'GD', bands = ['_t1','_t2','_a1','_a2','_b1','_b2','_g1','_g2'], setting = 'unique_sent', is_add_CLS_token = False):
         self.inputs = []
@@ -391,14 +456,17 @@ if __name__ == '__main__':
         # train_set = ZuCo_dataset(whole_dataset_dicts, 'train', tokenizer, subject = subject_choice, eeg_type = eeg_type_choice, bands = bands_choice, setting = dataset_setting)
         # # train_dataloader = DataLoader(train_set, batch_size = 8, shuffle=True, num_workers=4)
         # dev_set = ZuCo_dataset(whole_dataset_dicts, 'dev', tokenizer, subject = subject_choice, eeg_type = eeg_type_choice, bands = bands_choice, setting = dataset_setting)
-        # test_set = ZuCo_dataset(whole_dataset_dicts, 'test', tokenizer, subject = subject_choice, eeg_type = eeg_type_choice, bands = bands_choice, setting = dataset_setting)
-        train_set = EEGWordDataset(whole_dataset_dicts, 'train', tokenizer, subject_choice, eeg_type_choice, bands_choice, dataset_setting)
-        dev_set = EEGWordDataset(whole_dataset_dicts, 'dev', tokenizer, subject_choice, eeg_type_choice, bands_choice, dataset_setting)
-        test_set = EEGWordDataset(whole_dataset_dicts, 'test', tokenizer, subject_choice, eeg_type_choice, bands_choice, dataset_setting)
+        test_set = ZuCo_dataset(whole_dataset_dicts, 'test', tokenizer, subject = subject_choice, eeg_type = eeg_type_choice, bands = bands_choice, setting = dataset_setting)
 
-        print('trainset size:',len(train_set))
-        print('devset size:',len(dev_set))
-        print('testset size:',len(test_set))
+        # train_set = EEGWordDataset(whole_dataset_dicts, 'train', tokenizer, subject_choice, eeg_type_choice, bands_choice, dataset_setting)
+        # dev_set = EEGWordDataset(whole_dataset_dicts, 'dev', tokenizer, subject_choice, eeg_type_choice, bands_choice, dataset_setting)
+        # test_set = EEGWordDataset(whole_dataset_dicts, 'test', tokenizer, subject_choice, eeg_type_choice, bands_choice, dataset_setting)
+
+        # test_sent_set = EEGSentDataset(whole_dataset_dicts, 'test', tokenizer, subject_choice, eeg_type_choice, bands_choice, dataset_setting)
+
+        # print('trainset size:',len(train_set))
+        # print('devset size:',len(dev_set))
+        # print('testset size:',len(test_set))
 
     # elif check_dataset == 'stanford_sentiment':
     #     tokenizer = BertTokenizer.from_pretrained('bert-base-cased')

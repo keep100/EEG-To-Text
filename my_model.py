@@ -109,44 +109,53 @@ class BrainTranslator(nn.Module):
 
         return output, commitment_loss
 
-class Encoder(nn.Module):
-    def __init__(self, embedding_dim=840, hidden_dim=1024):
-        super().__init__()
-        self.lstm = nn.LSTM(embedding_dim, hidden_dim, batch_first=True)
+# class Encoder(nn.Module):
+#     def __init__(self, embedding_dim=840, hidden_dim=1024):
+#         super().__init__()
+#         self.lstm = nn.LSTM(embedding_dim, hidden_dim, batch_first=True)
     
-    def forward(self, x):
-        x = x.unsqueeze(1)
-        outputs, (hidden, cell) = self.lstm(x)
-        return outputs, (hidden, cell)
+#     def forward(self, x):
+#         x = x.unsqueeze(1)
+#         outputs, (hidden, cell) = self.lstm(x)
+#         return outputs, (hidden, cell)
 
-class Decoder(nn.Module):
-    def __init__(self, embedding_dim=840, hidden_dim=1024, target_vocab_size=2048):
-        super().__init__()
-        self.embedding = nn.Embedding(target_vocab_size, embedding_dim)
-        self.lstm = nn.LSTM(embedding_dim+hidden_dim, hidden_dim, batch_first=True)
-        self.fc = nn.Linear(hidden_dim, target_vocab_size)
+# class Decoder(nn.Module):
+#     def __init__(self, embedding_dim=840, hidden_dim=1024, target_vocab_size=2048):
+#         super().__init__()
+#         self.embedding = nn.Embedding(target_vocab_size, embedding_dim)
+#         self.lstm = nn.LSTM(embedding_dim+hidden_dim, hidden_dim, batch_first=True)
+#         self.fc = nn.Linear(hidden_dim, target_vocab_size)
     
-    def forward(self, x, hidden, cell):
-        # x = x.unsqueeze(1)
-        x = self.embedding(x)
-        context = hidden[-1].repeat(x.shape[1], 1, 1).permute(1, 0, 2)
-        # print(context.shape)
-        x_and_context = torch.cat((x, context), 2)
-        outputs, (hidden, cell) = self.lstm(x_and_context, (hidden, cell))
-        x = self.fc(outputs)
-        # print(x.shape)
-        return x
+#     def forward(self, x, hidden, cell):
+#         # x = x.unsqueeze(1)
+#         x = self.embedding(x)
+#         context = hidden[-1].repeat(x.shape[1], 1, 1).permute(1, 0, 2)
+#         # print(context.shape)
+#         x_and_context = torch.cat((x, context), 2)
+#         outputs, (hidden, cell) = self.lstm(x_and_context, (hidden, cell))
+#         x = self.fc(outputs)
+#         # print(x.shape)
+#         return x, (hidden, cell)
 
 class EEGToWord(nn.Module):
-    def __init__(self, target_vocab_size=2048):
+    def __init__(self, input_dim=840, hidden_dim=256, vocab_size=1000, max_seq_length=10):
         super().__init__()
-        self.encoder = Encoder()
-        self.decoder = Decoder(target_vocab_size=target_vocab_size)
-    
-    def forward(self, x, y):
-        outputs, (hidden, cell) = self.encoder(x)
-        y = self.decoder(y, hidden, cell)
-        return y
+        self.encoder = nn.Linear(input_dim, hidden_dim)
+        self.lstm = nn.LSTM(hidden_dim, hidden_dim, batch_first=True)
+        self.decoder = nn.Linear(hidden_dim, vocab_size)
+        self.max_seq_length = max_seq_length
+        self.vocab_size = vocab_size
+        
+    def forward(self, x):
+        # 编码阶段
+        x = self.encoder(x)
+        x = x.unsqueeze(1).repeat(1, self.max_seq_length, 1)  # 扩展维度以适应LSTM输入
+        lstm_out, _ = self.lstm(x)
+        
+        # 解码阶段
+        output = self.decoder(lstm_out)
+        
+        return output
 
 class Quantize(nn.Module):
     def __init__(self, num_embeddings=512, embedding_dim=1024, decay=0.99, eps=1e-5):
