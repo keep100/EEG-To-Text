@@ -1,0 +1,10 @@
+target string: Everything its title implies, a standard-issue crime drama spat out from the Tinseltown assembly line.
+predicted string:  about a implies, including man forissue, story. between of the beginning Housetown set..
+################################################
+
+
+target string: This odd, poetic road movie, spiked by jolts of pop music, pretty much takes place in Morton's ever-watchful gaze -- and it's a tribute to the actress, and to her inventive director, that the journey is such a mesmerizing one.
+predicted string:  is, but, trip is which with aingoting of humor culture, is much sums place in the's home-presentful,. and it's a little to the film who who the the talent,, George she film is so a joyizing experience.</s>
+################################################
+
+
