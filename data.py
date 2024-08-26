@@ -10,8 +10,7 @@ import torch.nn.functional as F
 from glob import glob
 from transformers import BartTokenizer, BertTokenizer
 from tqdm import tqdm
-from fuzzy_match import match
-from fuzzy_match import algorithims
+from fuzzy_match import match, algorithims
 
 
 def normalize_1d(input_tensor):
@@ -153,13 +152,17 @@ def get_input_sample(sent_obj, tokenizer, eeg_type = 'GD', bands = ['_t1','_t2',
     return input_sample
 
 class EEGWordDataset(Dataset):
-    def __init__(self, input_dataset_dicts, phase, tokenizer, subject = 'ALL', eeg_type = 'GD', bands = ['_t1','_t2','_a1','_a2','_b1','_b2','_g1','_g2'], setting = 'unique_sent', max_len = 14):
+    def __init__(self, input_dataset_dicts, phase, tokenizer, subject = 'ALL', eeg_type = 'GD', bands = ['_t1','_t2','_a1','_a2','_b1','_b2','_g1','_g2'], setting = 'unique_sent', max_len = 3):
         super().__init__()
         self.word_eeg = []
         self.english_words = []
+        self.labels = []
         self.tokenizer = tokenizer
         self.max_len = max_len
 
+        with open('vocab.json', 'r', encoding='utf-8') as f:
+            # 加载JSON数据到字典
+            vocab_dict = json.load(f)
         if not isinstance(input_dataset_dicts,list):
             input_dataset_dicts = [input_dataset_dicts]
         for input_dataset_dict in input_dataset_dicts:
@@ -172,43 +175,54 @@ class EEGWordDataset(Dataset):
             for key in subjects:
                 sub_word_eeg = []
                 sub_english_words = []
+                sub_labels = []
                 for sen_obj in input_dataset_dict[key]:
                     if sen_obj is None:
                         continue
                     for word_obj in sen_obj['word']:
                         word_eeg_embedding = get_word_embedding_eeg_tensor(word_obj, eeg_type, bands)
-                        if word_eeg_embedding is not None:
+                        if word_eeg_embedding is None:
+                            continue
+                        if word_obj['content'] == 'emp11111ty':
+                            word_obj['content'] = 'empty'
+                        if word_obj['content'] == 'film.1':
+                            word_obj['content'] = 'film.'
+                        # word_ids = self.tokenizer(word_obj['content'], add_special_tokens=False, return_tensors="pt")['input_ids'][0]
+                        # if word_ids.shape[0] > self.max_len:
+                        #     continue
+                        if word_obj['content'] in vocab_dict:
                             sub_word_eeg.append(word_eeg_embedding)
-                            if word_obj['content'] == 'emp11111ty':
-                                word_obj['content'] = 'empty'
-                            if word_obj['content'] == 'film.1':
-                                word_obj['content'] = 'film.'
                             sub_english_words.append(word_obj['content'])
+                            sub_labels.append(vocab_dict[word_obj['content']])
                 total_num_word = len(sub_english_words)
                 train_divider = int(0.8*total_num_word)
                 dev_divider = train_divider + int(0.1*total_num_word)
                 if phase == 'train':
                     self.word_eeg.append(sub_word_eeg[:train_divider])
                     self.english_words.append(sub_english_words[:train_divider])
+                    self.labels.append(sub_labels[:train_divider])
                 elif phase == 'dev':
                     self.word_eeg.append(sub_word_eeg[train_divider:dev_divider])
                     self.english_words.append(sub_english_words[train_divider:dev_divider])
+                    self.labels.append(sub_labels[train_divider:dev_divider])
                 elif phase == 'test':
                     self.word_eeg.append(sub_word_eeg[dev_divider:])
                     self.english_words.append(sub_english_words[dev_divider:])
+                    self.labels.append(sub_labels[dev_divider:])
         self.word_eeg = np.concatenate(self.word_eeg)
         self.english_words = list(np.concatenate(self.english_words))
-        # self.word_ids = tokenizer(self.english_words, padding=True, return_tensors="pt")['input_ids']
+        self.labels = list(np.concatenate(self.labels))
     
     def __len__(self):
         return len(self.english_words)
 
     def __getitem__(self, idx):
-        word = self.english_words[idx]
-        word_tokenized = self.tokenizer(word, padding='max_length',max_length=self.max_len, add_special_tokens=False, return_tensors="pt")
-        word_id = word_tokenized['input_ids'][0]
-        attention_mask = word_tokenized['attention_mask'][0]
-        return self.word_eeg[idx], word_id, attention_mask
+        # word = self.english_words[idx]
+        # word_tokenized = self.tokenizer(word, padding='max_length',max_length=self.max_len, add_special_tokens=False, return_tensors="pt")
+        # word_id = word_tokenized['input_ids'][0]
+        # attention_mask = word_tokenized['attention_mask'][0]
+        # return self.word_eeg[idx], word_id, attention_mask
+        return self.word_eeg[idx], self.labels[idx]
 
 class EEGSentDataset(Dataset):
     def __init__(self, input_dataset_dicts, phase, tokenizer, subject = 'ALL', eeg_type = 'GD', bands = ['_t1','_t2','_a1','_a2','_b1','_b2','_g1','_g2'], setting = 'unique_sent', max_len = 14, max_sent_len = 56):
@@ -454,14 +468,13 @@ if __name__ == '__main__':
         bands_choice = ['_t1','_t2','_a1','_a2','_b1','_b2','_g1','_g2'] 
         print(f'[INFO]using bands {bands_choice}')
         # train_set = ZuCo_dataset(whole_dataset_dicts, 'train', tokenizer, subject = subject_choice, eeg_type = eeg_type_choice, bands = bands_choice, setting = dataset_setting)
-        # # train_dataloader = DataLoader(train_set, batch_size = 8, shuffle=True, num_workers=4)
+        # train_dataloader = DataLoader(train_set, batch_size = 8, shuffle=True, num_workers=4)
         # dev_set = ZuCo_dataset(whole_dataset_dicts, 'dev', tokenizer, subject = subject_choice, eeg_type = eeg_type_choice, bands = bands_choice, setting = dataset_setting)
-        test_set = ZuCo_dataset(whole_dataset_dicts, 'test', tokenizer, subject = subject_choice, eeg_type = eeg_type_choice, bands = bands_choice, setting = dataset_setting)
+        # test_set = ZuCo_dataset(whole_dataset_dicts, 'test', tokenizer, subject = subject_choice, eeg_type = eeg_type_choice, bands = bands_choice, setting = dataset_setting)
 
         # train_set = EEGWordDataset(whole_dataset_dicts, 'train', tokenizer, subject_choice, eeg_type_choice, bands_choice, dataset_setting)
         # dev_set = EEGWordDataset(whole_dataset_dicts, 'dev', tokenizer, subject_choice, eeg_type_choice, bands_choice, dataset_setting)
-        # test_set = EEGWordDataset(whole_dataset_dicts, 'test', tokenizer, subject_choice, eeg_type_choice, bands_choice, dataset_setting)
-
+        test_set = EEGWordDataset(whole_dataset_dicts, 'test', tokenizer, subject_choice, eeg_type_choice, bands_choice, dataset_setting)
         # test_sent_set = EEGSentDataset(whole_dataset_dicts, 'test', tokenizer, subject_choice, eeg_type_choice, bands_choice, dataset_setting)
 
         # print('trainset size:',len(train_set))

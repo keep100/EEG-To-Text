@@ -138,24 +138,21 @@ class BrainTranslator(nn.Module):
 #         return x, (hidden, cell)
 
 class EEGToWord(nn.Module):
-    def __init__(self, input_dim=840, hidden_dim=256, vocab_size=1000, max_seq_length=10):
+    def __init__(self, input_dim=840, hidden_dim=2048, vocab_size=1000, max_seq_length=3):
         super().__init__()
-        self.encoder = nn.Linear(input_dim, hidden_dim)
-        self.lstm = nn.LSTM(hidden_dim, hidden_dim, batch_first=True)
-        self.decoder = nn.Linear(hidden_dim, vocab_size)
-        self.max_seq_length = max_seq_length
-        self.vocab_size = vocab_size
+        self.net = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, vocab_size),
+        )
+        self.max_len = max_seq_length
         
     def forward(self, x):
-        # 编码阶段
-        x = self.encoder(x)
-        x = x.unsqueeze(1).repeat(1, self.max_seq_length, 1)  # 扩展维度以适应LSTM输入
-        lstm_out, _ = self.lstm(x)
-        
-        # 解码阶段
-        output = self.decoder(lstm_out)
-        
-        return output
+        # output = self.net(x)
+        # return output.reshape(output.shape[0],self.max_len,int(output.shape[1]/self.max_len))
+        return self.net(x)
 
 class Quantize(nn.Module):
     def __init__(self, num_embeddings=512, embedding_dim=1024, decay=0.99, eps=1e-5):

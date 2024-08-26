@@ -6,6 +6,7 @@ import numpy as np
 import pickle
 import torch.optim as optim
 import pdb
+import json
 from tqdm import tqdm
 from torch.optim import lr_scheduler
 from torch.utils.data import DataLoader
@@ -18,6 +19,9 @@ from data import EEGWordDataset, EEGSentDataset
 from my_model import EEGToWord
 
 API_KEY = "a21332b650e647890eb4ec3ad9557152.8zM2MDTDliFA9XKM"
+with open('vocab.json', 'r', encoding='utf-8') as f:
+    # 加载JSON数据到字典
+    vocab_dict = json.load(f)
 
 def train(model, dataloaders, device, num_epochs, optimizer, criterion, scheduler, checkpoint_path_best = './checkpoints/decoding/best/temp_decoding.pt', checkpoint_path_last = './checkpoints/decoding/last/temp_decoding.pt'):
     best_loss = 100000000000
@@ -35,20 +39,21 @@ def train(model, dataloaders, device, num_epochs, optimizer, criterion, schedule
             running_loss = 0.0
             epoch_loss_total = 0.0
             count=0
-            for word_eeg, word_id, attention_mask in tqdm(dataloaders[phase]):
+            for word_eeg, word_id in tqdm(dataloaders[phase]):
                 word_eeg = word_eeg.to(device).float()
                 word_id = word_id.to(device)
-                attention_mask = attention_mask.to(device)
-                print(attention_mask)
+                # attention_mask = attention_mask.to(device)
+
                 optimizer.zero_grad()
                 with torch.set_grad_enabled(phase == 'train'):
                     output = model(word_eeg)
-                    loss = criterion(output, word_id, attention_mask)
+                    loss = criterion(output, word_id)
+                    # loss = criterion(output, word_id, attention_mask)
                     
                     if phase == 'train':
-                        loss.sum().backward()
+                        loss.backward()
                         optimizer.step()
-                    batch_loss = loss.sum()
+                    batch_loss = loss.item()*word_eeg.shape[0]
                     epoch_loss_total += batch_loss
                     running_loss += batch_loss
             if phase == 'train':
@@ -72,15 +77,24 @@ def eval(model, dataloaders, device, tokenizer, output_path='./results/temp.txt'
     model.eval()
     acc_count = 0
     with open(output_path,'w') as f:
-        for word_eeg, word_id, attention_mask in tqdm(dataloaders['test']):
+        for word_eeg, word_id in tqdm(dataloaders['test']):
             word_eeg = word_eeg.to(device).float()
-            word_id = word_id.to(device)
-            attention_mask = attention_mask.to(device)
+            word_id = word_id
+            # attention_mask = attention_mask.to(device)
             output = model(word_eeg)
 
-            target_word = tokenizer.decode(word_id[0], skip_special_tokens = True)
+            # target_word = tokenizer.decode(word_id[0], skip_special_tokens = True)
+            for key, val in vocab_dict.items():
+                if val == word_id:
+                    target_word = key
+                    break
             f.write(f'target word: {target_word}\t')
-            pred_word = get_pred_word(output, tokenizer, attention_mask)
+            # pred_word = get_pred_word(output, tokenizer, attention_mask)
+            pred_id = output.argmax(dim=1)[0]
+            for key, val in vocab_dict.items():
+                if val == pred_id:
+                    pred_word = key
+                    break
             f.write(f'pred word: {pred_word}\n')
             if pred_word == target_word:
                 acc_count +=1
@@ -172,8 +186,8 @@ class MaskedSoftmaxCELoss(nn.CrossEntropyLoss):
         return loss
 
 if __name__ == '__main__':
-    num_epochs = 20
-    batch_size = 256
+    num_epochs = 15
+    batch_size = 32
     lr = 1e-5
     phase = 'test'
     level = 'word'
@@ -201,7 +215,7 @@ if __name__ == '__main__':
     ''' set up device '''
     # use cuda
     if torch.cuda.is_available():  
-        dev = "cuda:3" 
+        dev = "cuda:5" 
     else:  
         dev = "cpu"
     # CUDA_VISIBLE_DEVICES=0,1,2,3  
@@ -234,9 +248,10 @@ if __name__ == '__main__':
     dataloaders = {'train':train_dataloader, 'dev':dev_dataloader, 'test':test_dataloader, 'test_sent':test_sent_dataloader}
 
     ''' set up model '''
-    model = EEGToWord(vocab_size=tokenizer.vocab_size, max_seq_length=14)
+    # model = EEGToWord(vocab_size=tokenizer.vocab_size)
+    model = EEGToWord(vocab_size=len(vocab_dict))
     if phase == 'test':
-        model.load_state_dict(torch.load('./checkpoints/word-level/best/b256_epoch20_lr1e-05_8-16-15-15.pt'))
+        model.load_state_dict(torch.load('./checkpoints/word-level/best/b32_epoch50_lr1e-05_8-23-10-27.pt'))
         model.to(device)
         if level == 'word':
             res_path = os.path.join('./results/word-level', f'{save_name}.txt')
@@ -249,8 +264,8 @@ if __name__ == '__main__':
 
         ''' set up optimizer and scheduler'''
         optimizer = optim.SGD(model.parameters(), lr = lr, momentum = 0.9)
-        criterion = MaskedSoftmaxCELoss()
-        # criterion = nn.CrossEntropyLoss()
+        # criterion = MaskedSoftmaxCELoss()
+        criterion = nn.CrossEntropyLoss()
         exp_lr_scheduler = lr_scheduler.StepLR(optimizer, step_size = 10, gamma = 0.1)
 
         trained_model = train(model, dataloaders, device, num_epochs, optimizer, criterion, exp_lr_scheduler, checkpoint_best, checkpoint_last)
