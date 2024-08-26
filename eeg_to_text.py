@@ -7,6 +7,8 @@ import pickle
 import torch.optim as optim
 import pdb
 import json
+import argparse
+
 from tqdm import tqdm
 from torch.optim import lr_scheduler
 from torch.utils.data import DataLoader
@@ -36,9 +38,8 @@ def train(model, dataloaders, device, num_epochs, optimizer, criterion, schedule
             else:
                 model.eval()   # Set model to evaluate mode
 
-            running_loss = 0.0
             epoch_loss_total = 0.0
-            count=0
+
             for word_eeg, word_id in tqdm(dataloaders[phase]):
                 word_eeg = word_eeg.to(device).float()
                 word_id = word_id.to(device)
@@ -55,7 +56,6 @@ def train(model, dataloaders, device, num_epochs, optimizer, criterion, schedule
                         optimizer.step()
                     batch_loss = loss.item()*word_eeg.shape[0]
                     epoch_loss_total += batch_loss
-                    running_loss += batch_loss
             if phase == 'train':
                 scheduler.step()
             epoch_loss = epoch_loss_total / len(dataloaders[phase].dataset)
@@ -186,11 +186,20 @@ class MaskedSoftmaxCELoss(nn.CrossEntropyLoss):
         return loss
 
 if __name__ == '__main__':
-    num_epochs = 15
-    batch_size = 32
-    lr = 1e-5
-    phase = 'test'
-    level = 'word'
+    parser = argparse.ArgumentParser(description='Specify config args for decoding')
+    parser.add_argument('--cuda', help='specify cuda device name, e.g. cuda:0, cuda:1, etc', default = 'cuda:0')
+    parser.add_argument('--num_epochs', type = int, help='num_epochs', default = 30, required=True)
+    parser.add_argument('--batch_size', type = int, help='batch_size', default = 32, required=True)
+    parser.add_argument('--lr', type = float, help='learning_rate', default = 0.00005, required=True)
+    parser.add_argument('--phase', help='train phase or test phase', default = 'train', required=True)
+    parser.add_argument('--checkpoint_path', help='checkpoint_path', default = './checkpoints/word-level/best/b32_epoch50_lr1e-05_8-23-10-27.pt')
+    args = vars(parser.parse_args())
+
+    num_epochs = args['num_epochs']
+    batch_size = args['batch_size']
+    lr = args['lr']
+    phase = args['phase']
+    checkpoint_path = args['checkpoint_path']
 
     save_path = './checkpoints/word-level'
     if not os.path.exists(save_path):
@@ -215,7 +224,7 @@ if __name__ == '__main__':
     ''' set up device '''
     # use cuda
     if torch.cuda.is_available():  
-        dev = "cuda:5" 
+        dev = args['cuda']
     else:  
         dev = "cpu"
     # CUDA_VISIBLE_DEVICES=0,1,2,3  
@@ -251,14 +260,16 @@ if __name__ == '__main__':
     # model = EEGToWord(vocab_size=tokenizer.vocab_size)
     model = EEGToWord(vocab_size=len(vocab_dict))
     if phase == 'test':
-        model.load_state_dict(torch.load('./checkpoints/word-level/best/b32_epoch50_lr1e-05_8-23-10-27.pt'))
+        model.load_state_dict(torch.load(checkpoint_path))
         model.to(device)
-        if level == 'word':
-            res_path = os.path.join('./results/word-level', f'{save_name}.txt')
-            eval(model, dataloaders, device, tokenizer, res_path)
-        elif level == 'sentence':
-            res_path = os.path.join('./results/sent-level', f'{save_name}.txt')
-            generate_sent(model, dataloaders, device, tokenizer, res_path)
+        res_path = os.path.join('./results/word-level', f'{save_name}.txt')
+        eval(model, dataloaders, device, tokenizer, res_path)
+        # if level == 'word':
+        #     res_path = os.path.join('./results/word-level', f'{save_name}.txt')
+        #     eval(model, dataloaders, device, tokenizer, res_path)
+        # elif level == 'sentence':
+        #     res_path = os.path.join('./results/sent-level', f'{save_name}.txt')
+        #     generate_sent(model, dataloaders, device, tokenizer, res_path)
     else:
         model.to(device)
 
