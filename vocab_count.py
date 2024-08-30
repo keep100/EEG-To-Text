@@ -58,8 +58,8 @@ if __name__ == '__main__':
         else:
             tokenizer_dict[ids_len] = 1
     print(tokenizer_dict)
-    with open('vocab.json', 'w', encoding='utf-8') as f:
-        json.dump(vocab_dict, f, ensure_ascii=False)
+    # with open('vocab.json', 'w', encoding='utf-8') as f:
+    #     json.dump(vocab_dict, f, ensure_ascii=False)
     # keys = sorted(tokenizer_dict.keys(),key=lambda id_len: int(id_len))
     # values = [tokenizer_dict[key] for key in keys]
 

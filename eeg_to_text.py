@@ -1,6 +1,7 @@
 import os
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import datetime
 import numpy as np
 import pickle
@@ -8,6 +9,7 @@ import torch.optim as optim
 import pdb
 import json
 import argparse
+import wandb
 
 from tqdm import tqdm
 from torch.optim import lr_scheduler
@@ -20,6 +22,7 @@ from zhipuai import ZhipuAI
 from data import EEGWordDataset, EEGSentDataset
 from my_model import EEGToWord
 
+wandb.login()
 API_KEY = "a21332b650e647890eb4ec3ad9557152.8zM2MDTDliFA9XKM"
 with open('vocab.json', 'r', encoding='utf-8') as f:
     # 加载JSON数据到字典
@@ -56,6 +59,10 @@ def train(model, dataloaders, device, num_epochs, optimizer, criterion, schedule
                         optimizer.step()
                     batch_loss = loss.item()*word_eeg.shape[0]
                     epoch_loss_total += batch_loss
+                if phase=='train':
+                    wandb.log({"Loss/train": loss.item()})
+                else:
+                    wandb.log({"Loss/dev": loss.item()})
             if phase == 'train':
                 scheduler.step()
             epoch_loss = epoch_loss_total / len(dataloaders[phase].dataset)
@@ -90,7 +97,8 @@ def eval(model, dataloaders, device, tokenizer, output_path='./results/temp.txt'
                     break
             f.write(f'target word: {target_word}\t')
             # pred_word = get_pred_word(output, tokenizer, attention_mask)
-            pred_id = output.argmax(dim=1)[0]
+            probabilities = F.softmax(output,dim=1)
+            pred_id = probabilities.argmax(dim=1)[0]
             for key, val in vocab_dict.items():
                 if val == pred_id:
                     pred_word = key
@@ -230,6 +238,17 @@ if __name__ == '__main__':
     # CUDA_VISIBLE_DEVICES=0,1,2,3  
     device = torch.device(dev)
     print(f'[INFO]using device {dev}')
+
+    '''init wandb'''
+    run = wandb.init(
+        # Set the project where this run will be logged
+        project="EEG-To-Word",
+        # Track hyperparameters and run metadata
+        config={
+            "learning_rate": lr,
+            "epochs": num_epochs,
+        },
+    )
 
     ''' set up dataloader '''
     whole_dataset_dicts = []
